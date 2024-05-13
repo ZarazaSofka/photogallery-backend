@@ -2,21 +2,27 @@ const mongoose = require("mongoose");
 const { GridFsStorage } = require("multer-gridfs-storage");
 const Grid = require("gridfs-stream");
 const multer = require("multer");
+const MongoStore = require("connect-mongo");
+const config = require("../config");
 
 mongoose.connect(config.mongoURI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
-const conn = mongoose.connection;
+const connection = mongoose.connection;
 
 let gfs;
 
-conn.once("open", () => {
-  gfs = Grid(conn.db, mongoose.mongo);
+connection.once("open", () => {
+  gfs = Grid(connection.db, mongoose.mongo);
   gfs.collection("uploads");
 });
 
-const storage = new GridFsStorage({
+const mongoStore = new MongoStore({
+  mongoUrl: connection.client.s.url,
+});
+
+const gridFsStorage = new GridFsStorage({
   url: config.mongoURI,
   file: (req, file) => {
     return {
@@ -25,6 +31,6 @@ const storage = new GridFsStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({ gridFsStorage });
 
-module.exports = { gfs, upload };
+module.exports = { gfs, upload, mongoStore };

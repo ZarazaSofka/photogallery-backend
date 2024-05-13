@@ -1,53 +1,78 @@
-import {
-  read,
-  register,
-  authenticate,
-  update,
-  deleteUser,
-} from "../services/user";
-import { Router } from "express";
-const router = Router();
+const express = require("express");
+const router = express.Router();
+const UserService = require("../services/user");
 
+const isOwnerOrAdmin = async (req, res, next) => {
+  const userId = req.params.userId;
+  if (
+    req.user &&
+    (req.user.rights.includes("ROLE_ADMIN") || req.user.id === userId)
+  ) {
+    next(); // Продолжаем выполнение следующих обработчиков маршрута
+  } else {
+    console.log(
+      `Недостаточно прав для выполнения действия с пользователем ${userId}`
+    );
+    res
+      .status(403)
+      .json({ message: "Недостаточно прав для выполнения данного действия" });
+  }
+};
+
+// Маршрут для чтения пользователя
 router.get("/:userId", async (req, res) => {
-  const user = await read(req.params.userId);
-  if (user) {
+  const userId = req.params.userId;
+  try {
+    const user = await UserService.readUser(userId);
     res.json(user);
-  } else {
-    res.sendStatus(404);
+  } catch (error) {
+    console.log(`Ошибка чтения пользователя ${userId}`);
+    res.status(500).json({ error: error.message });
   }
 });
 
-router.post("/", async (req, res) => {
-  const user = await register(req.body);
-  res.json(user);
+router.post("/auth", passport.authenticate("local"), async (req, res) => {
+  try {
+    res.status(200).json({ message: "Успешная авторизация", user: req.user });
+  } catch (error) {
+    console.log(`Ошибка аутентификации: ${error.message}`);
+    res.status(401).json({ error: error.message });
+  }
 });
 
-router.post("/auth", async (req, res) => {
-  const user = await authenticate(req.body);
-  if (user) {
+// Маршрут для регистрации пользователя
+router.post("/register", async (req, res) => {
+  try {
+    const user = await UserService.register(req.body);
     res.json(user);
-  } else {
-    res.sendStatus(401);
+  } catch (error) {
+    console.log(`Ошибка регистрации нового пользователя`);
+    res.status(500).json({ error: error.message });
   }
 });
 
-router.put("/:userId", async (req, res) => {
-  const user = await update(req.body);
-  if (user) {
-    res.json(user);
-  } else {
-    res.sendStatus(404);
+// Маршрут для обновления пользователя
+router.put("/:userId", isOwnerOrAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const updatedUser = await UserService.updateUser(userId, req.body);
+    res.json(updatedUser);
+  } catch (error) {
+    console.log(`Ошибка обновления пользователя ${userId}`);
+    res.status(500).json({ error: error.message });
   }
 });
 
-router.delete("/", async (req, res) => {
-  const { admin, user } = req.query;
-  const deleted = await deleteUser(admin, user);
-  if (deleted) {
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
+// Маршрут для удаления пользователя
+router.delete("/:userId", isOwnerOrAdmin, async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const result = await UserService.deleteUser(userId);
+    res.json(result);
+  } catch (error) {
+    console.log(`Ошибка удаления пользователя ${userId}`);
+    res.status(500).json({ error: error.message });
   }
 });
 
-export default router;
+module.exports = router;

@@ -1,68 +1,57 @@
 const { gfs } = require("../utils/connectDB");
-const { Photo } = require("../models/photo");
+const Photo = require("../models/photo");
 const sharp = require("sharp");
+const config = require("../config");
 
-export class PhotoService {
+module.exports = class PhotoService {
   static async readUserPhotos(userId) {
+    console.log(`Reading user photos for user ${userId}`);
     return await Photo.find({ user: userId })
       .sort({ createdAt: -1 })
-      .select("id user score likes createdAt")
-      .populate("user", "-password");
+      .populate("user");
   }
 
   static async readPopularPhotos() {
-    return await Photo.find()
-      .sort({ score: -1 })
-      .limit(10)
-      .select("id user score likes createdAt")
-      .populate("user", "-password");
+    console.log("Reading popular photos");
+    return await Photo.find().sort({ score: -1 }).limit(10).populate("user");
   }
 
   static async readLatestPhotos() {
+    console.log("Reading latest photos");
     return await Photo.find()
       .sort({ createdAt: -1 })
       .limit(10)
-      .select("id user score likes createdAt")
-      .populate("user", "-password");
+      .populate("user");
   }
 
   static async readPhotos(last = null) {
     const limit = parseInt(config.MAX_DOWNLOAD_PHOTOS_VALUE);
     const query = last ? { _id: { $lt: last } } : {};
+    console.log(`Reading photos up to ${last} with limit ${limit}`);
     const photos = await Photo.aggregate([
       { $match: query },
       { $sort: { _id: -1 } },
       { $limit: limit },
-      {
-        $project: {
-          id: 1,
-          user: 1,
-          score: 1,
-          likes: 1,
-          createdAt: 1,
-        },
-      },
     ]);
-    return await Photo.populate(photos, { path: "user", select: "-password" });
+    return await Photo.populate(photos, { path: "user" });
   }
 
   static async readPhoto(id) {
+    console.log(`Reading photo ${id}`);
     const photo = await Photo.findById(id);
     if (!photo) return null;
-    const file = await gfs.findOne({ _id: photo.file });
-    if (!file) return null;
-    return file.read();
+    return await createBlob(photo.file);
   }
 
   static async readCompressedPhoto(id) {
+    console.log(`Reading compressed photo ${id}`);
     const photo = await Photo.findById(id);
     if (!photo) return null;
-    const file = await gfs.findOne({ _id: photo.compressed });
-    if (!file) return null;
-    return file.read();
+    return await createBlob(photo.compressed);
   }
 
   static async createPhoto(userId, fileId, description = null) {
+    console.log(`Creating photo for user ${userId} with file ${fileId}`);
     const compressedPhotoId = createCompressedPhoto(fileId);
     const newPhoto = new Photo({
       file: fileId,
@@ -72,23 +61,22 @@ export class PhotoService {
       likes: [],
     });
     if (description) newPhoto.description = description;
-    return await newPhoto.save();
+    return await newPhoto.save().populate("user");
   }
 
-  static async deletePhoto(user, id) {
+  static async deletePhoto(id) {
+    console.log(`Deleting photo ${id}`);
     const photo = await Photo.findById(id);
-    if (!photo) return null;
-    if (!user.rights.includes("ROLE_ADMIN") && user.id !== photo.user)
-      return null;
     await Promise.all([
       gfs.remove({ _id: photo.file }),
       gfs.remove({ _id: photo.compressed }),
     ]);
-    return Photo.findByIdAndDelete(id)
-      .populate("user", "-password")
-      .select("id user score likes createdAt");
+    return Photo.findByIdAndDelete(id).populate("user");
   }
-}
+  static async getPhotoUser(id) {
+    return await Photo.findById(id, "user").exec();
+  }
+};
 
 function createCompressedPhoto(fileId) {
   const readStream = gfs.createReadStream({ _id: fileId });
@@ -113,5 +101,27 @@ function createCompressedPhoto(fileId) {
   readStream.pipe(compressedImage).pipe(writeStream);
   writeStream.on("close", async (file) => {
     return file._id;
+  });
+}
+
+async function createBlob(fileId) {
+  gfs.files.findOne({ _id: fileId }, (err, file) => {
+    if (err) {
+      console.error(err);
+      return;
+    }
+    if (!file) {
+      console.error("Файл не найден");
+      return;
+    }
+
+    const readstream = gfs.createReadStream({ _id: fileId });
+    let data = [];
+    readstream.on("data", (chunk) => {
+      data.push(chunk);
+    });
+    readstream.on("end", () => {
+      return new Blob(data, { type: file.contentType });
+    });
   });
 }

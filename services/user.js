@@ -1,44 +1,48 @@
+const passport = require("passport");
+const LocalStrategy = require("passport-local").Strategy;
 const User = require("../models/user");
-const bcrypt = require("bcryptjs");
 
-const User = require("../models/user");
+passport.use(new LocalStrategy(User.authenticate()));
+passport.serializeUser(User.serializeUser());
+passport.deserializeUser(User.deserializeUser());
 
-class UserService {
-  static read(userId) {
-    return User.findById(userId).select("-_id -password");
+module.exports = class UserService {
+  static async readUser(userId) {
+    try {
+      return await User.findById(userId);
+    } catch (error) {
+      throw new Error("Ошибка чтения данных пользователя");
+    }
   }
 
-  static register(userData) {
-    const user = new User({
-      login: userData.login,
-      email: userData.email,
-      password: bcrypt.hashSync(userData.password, 10),
-      rights: ["ROLE_USER"],
-    });
-    return user.save().select("-_id -password");
+  static async register(userData) {
+    try {
+      return await User.register(userData, userData.password);
+    } catch (error) {
+      throw new Error("Ошибка регистрации");
+    }
   }
 
-  static authenticate(userData) {
-    return User.findOne({ login: userData.login }).then((user) =>
-      user && bcrypt.compareSync(userData.password, user.password)
-        ? user.select("-_id -password")
-        : null
-    );
+  static async updateUser(userId, userData) {
+    try {
+      const updateData = {};
+      if (userData.login) updateData.login = userData.login;
+      if (userData.email) updateData.email = userData.email;
+      return User.findByIdAndUpdate(userId, updateData, {
+        new: true,
+      });
+    } catch (error) {
+      throw new Error("Ошибка обновления пользователя");
+    }
   }
 
-  static update(userData) {
-    const updateData = {};
-    if (userData.login) updateData.login = userData.login;
-    if (userData.email) updateData.email = userData.email;
-    if (userData.rights) updateData.rights = userData.rights;
-    return User.findByIdAndUpdate(userData.id, updateData, {
-      new: true,
-    }).select("-_id -password");
+  static async deleteUser(userId) {
+    try {
+      return User.findByIdAndDelete(userId).then(
+        (deletedUser) => !!deletedUser
+      );
+    } catch (error) {
+      throw new Error("Ошибка удаления пользователя");
+    }
   }
-
-  static deleteUser(userId) {
-    return User.findByIdAndDelete(userId).then((deletedUser) => !!deletedUser);
-  }
-}
-
-export default UserService;
+};

@@ -1,4 +1,4 @@
-import { Schema, model } from "mongoose";
+const { Schema, model } = require("mongoose");
 
 const setSchema = new Schema(
   {
@@ -24,6 +24,9 @@ const setSchema = new Schema(
   {
     toJSON: {
       virtuals: true,
+      transform(doc, ret) {
+        delete ret._id;
+      },
     },
   }
 );
@@ -32,4 +35,4 @@ setSchema.virtual("id").get(function () {
   return this._id;
 });
 
-export default model("Set", setSchema);
+module.exports = model("Set", setSchema);

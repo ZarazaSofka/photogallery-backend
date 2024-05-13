@@ -1,4 +1,4 @@
-import { Schema, model } from "mongoose";
+const { Schema, model } = require("mongoose");
 
 const photoSchema = new Schema(
   {
@@ -47,6 +47,11 @@ const photoSchema = new Schema(
     timestamps: true,
     toJSON: {
       virtuals: true,
+      transform: function (doc, ret) {
+        delete ret._id;
+        delete ret.file;
+        delete ret.compressed;
+      },
     },
   }
 );
@@ -55,6 +60,19 @@ photoSchema.virtual("id").get(function () {
   return this._id;
 });
 
+photoSchema.pre("remove", async function (next) {
+  try {
+    // Находим все наборы, содержащие данную фотографию и удаляем ее из них
+    await Set.updateMany(
+      { photoList: this._id },
+      { $pull: { photoList: this._id } }
+    );
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 const Photo = model("Photo", photoSchema);
 
-export { Photo };
+module.exports = Photo;
