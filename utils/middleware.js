@@ -7,6 +7,17 @@ const authMiddleware = (req, res, next) => {
   next();
 };
 
+const isAdmin = async (req, res, next) => {
+  if (req.user && req.user.rights.includes("ROLE_ADMIN")) {
+    next(); // Продолжаем выполнение следующих обработчиков маршрута
+  } else {
+    console.log(`Недостаточно прав для выполнения действия`);
+    res
+      .status(403)
+      .json({ message: "Недостаточно прав для выполнения данного действия" });
+  }
+};
+
 const isMeOrAdmin = async (req, res, next) => {
   const userId = req.params.userId;
   if (
@@ -68,6 +79,7 @@ const isPhotoOwnerOrAdmin = async (req, res, next) => {
 
 module.exports = {
   authMiddleware,
+  isAdmin,
   isMeOrAdmin,
   isSetOwnerOrAdmin,
   isPhotoOwnerOrAdmin,

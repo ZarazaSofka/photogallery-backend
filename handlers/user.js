@@ -1,5 +1,5 @@
 const userService = require("../services/user");
-const { isMeOrAdmin } = require("../utils/middleware");
+const { isAdmin, isMeOrAdmin } = require("../utils/middleware");
 const express = require("express");
 const passport = require("passport");
 const multer = require("multer");
@@ -13,6 +13,8 @@ class UserHandler {
   }
 
   initializeRoutes() {
+    this.router.get("/", isAdmin, this.readUsers.bind(this));
+
     this.router.get("/:userId", this.readUser.bind(this));
     this.router.get("/:userId/photo", this.readProfilePhoto.bind(this));
     this.router.post(
@@ -39,6 +41,16 @@ class UserHandler {
       }
       res.status(200).json({ message: "Вы вышли" });
     });
+  }
+
+  async readUsers(req, res) {
+    try {
+      const users = await this.userService.readUsers();
+      res.json(users);
+    } catch (error) {
+      console.log(`Ошибка чтения пользователей`);
+      res.status(500).json({ error: error.message });
+    }
   }
 
   async readUser(req, res) {

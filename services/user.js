@@ -7,6 +7,14 @@ passport.serializeUser(User.serializeUser());
 passport.deserializeUser(User.deserializeUser());
 
 class UserService {
+  async readUsers() {
+    try {
+      return await User.find();
+    } catch (error) {
+      throw new Error("Ошибка чтения данных пользователя");
+    }
+  }
+
   async readUser(userId) {
     try {
       return await User.findById(userId);
