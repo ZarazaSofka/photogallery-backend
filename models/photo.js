@@ -1,16 +1,16 @@
 const { Schema, model } = require("mongoose");
+const Set = require("./set");
 
 const photoSchema = new Schema(
   {
-    file: {
-      type: Schema.Types.ObjectId,
+    buffer: {
+      type: Buffer,
       required: true,
-      unique: true,
     },
-    compressed: {
-      type: Schema.Types.ObjectId,
+    contentType: {
+      type: String,
       required: true,
-      unique: true,
+      enum: ["image/jpeg", "image/png"],
     },
     description: {
       type: String,
@@ -25,22 +25,11 @@ const photoSchema = new Schema(
       type: Number,
       default: 0,
     },
-    likes: [
-      {
-        user: {
-          type: Schema.Types.ObjectId,
-          ref: "User",
-        },
-        like: {
-          type: Number,
-          enum: [-1, 0, 1],
-          default: 0,
-        },
-      },
-    ],
-    createdAt: {
-      type: Date,
-      default: Date.now,
+    likes: {
+      type: [Schema.Types.ObjectId],
+      ref: "User",
+      default: [],
+      required: true,
     },
   },
   {
@@ -49,8 +38,7 @@ const photoSchema = new Schema(
       virtuals: true,
       transform: function (doc, ret) {
         delete ret._id;
-        delete ret.file;
-        delete ret.compressed;
+        delete ret.__v;
       },
     },
   }
@@ -60,16 +48,28 @@ photoSchema.virtual("id").get(function () {
   return this._id;
 });
 
-photoSchema.pre("remove", async function (next) {
-  try {
-    // Находим все наборы, содержащие данную фотографию и удаляем ее из них
+photoSchema.post("findOneAndDelete", async function (doc) {
+  if (doc) {
     await Set.updateMany(
-      { photoList: this._id },
-      { $pull: { photoList: this._id } }
+      { photoList: doc._id },
+      { $pull: { photoList: doc._id } }
     );
+  }
+});
+
+photoSchema.pre("deleteMany", async function (next) {
+  try {
+    const docs = await this.model.find(this.getFilter());
+    if (docs.length > 0) {
+      const photoIds = docs.map((doc) => doc._id);
+      await Set.updateMany(
+        { photoList: { $in: photoIds } },
+        { $pull: { photoList: { $in: photoIds } } }
+      );
+    }
     next();
-  } catch (error) {
-    next(error);
+  } catch (err) {
+    next(err);
   }
 });
 

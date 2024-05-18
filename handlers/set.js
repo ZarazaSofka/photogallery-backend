@@ -1,71 +1,77 @@
 const express = require("express");
-const router = express.Router();
-const SetService = require("../services/set");
-const authMiddleware = require("../utils/middleware");
+const { authMiddleware, isSetOwnerOrAdmin } = require("../utils/middleware");
 
-const isSetOwnerOrAdmin = async (req, res, next) => {
-  const userId = await SetService.getSetUser(req.params.setId);
-  console.log(
-    `Checking access to set ${req.params.setId} by user ${req.user.id}`
-  );
-  if (
-    req.user &&
-    (req.user.rights.includes("ROLE_ADMIN") || req.user.id === userId)
-  ) {
-    next(); // Продолжаем выполнение следующих обработчиков маршрута
-  } else {
-    res
-      .status(403)
-      .json({ message: "Недостаточно прав для выполнения данного действия" });
+class SetHandler {
+  constructor() {
+    this.router = express.Router();
+    this.setService = require("../services/set");
+    this.initializeRoutes();
   }
-};
 
-router.post("/", authMiddleware, async (req, res) => {
-  console.log(
-    `Creating set for user ${req.user.id} with name ${req.body.name}`
-  );
-  res.json(await SetService.createSet(req.user.id, req.body.name));
-});
+  initializeRoutes() {
+    this.router.get("/new", this.getNewSets.bind(this));
+    this.router.get("/:id", this.readSet.bind(this));
+    this.router.get("/user/:userId", this.readUserSets.bind(this));
+    this.router.post("/", authMiddleware, this.createSet.bind(this));
+    this.router.put("/:setId", isSetOwnerOrAdmin, this.updateSet.bind(this));
+    this.router.put(
+      "/:setId/photos/:photoId",
+      isSetOwnerOrAdmin,
+      this.addPhotoToSet.bind(this)
+    );
+    this.router.delete("/:setId", isSetOwnerOrAdmin, this.deleteSet.bind(this));
+    this.router.delete(
+      "/:setId/photos/:photoId",
+      isSetOwnerOrAdmin,
+      this.deletePhotoFromSet.bind(this)
+    );
+  }
 
-router.get("/:id", async (req, res) => {
-  const set = await SetService.readSet(req.params.id);
-  if (set) {
-    console.log(`Reading set ${req.params.id} by user ${req.user.id}`);
-    res.json(set);
-  } else res.sendStatus(404);
-});
+  async createSet(req, res) {
+    console.log(req);
+    console.log(req.body);
+    console.log(
+      `Creating set for user ${req.user.id} with name ${req.body.name}`
+    );
+    res.json(await this.setService.createSet(req.user.id, req.body.name));
+  }
 
-router.put("/:setId", isSetOwnerOrAdmin, async (req, res) => {
-  const updatedSet = await SetService.updateSet(
-    req.params.setId,
-    req.body.name
-  );
-  console.log(`Updating set ${req.params.setId} by user ${req.user.id}`);
-  res.json(updatedSet);
-});
+  async readSet(req, res) {
+    const set = await this.setService.readSet(req.params.id);
+    if (set) {
+      console.log(`Reading set ${req.params.id}`);
+      res.json(set);
+    } else res.sendStatus(404);
+  }
 
-router.delete("/:setId", isSetOwnerOrAdmin, async (req, res) => {
-  const deletedSet = await SetService.deleteSet(req.params.setId);
-  console.log(`Deleting set ${req.params.setId} by user ${req.user.id}`);
-  res.json(deletedSet);
-});
+  async updateSet(req, res) {
+    const updatedSet = await this.setService.updateSet(
+      req.params.setId,
+      req.body.name
+    );
+    console.log(`Updating set ${req.params.setId} by user ${req.user.id}`);
+    res.json(updatedSet);
+  }
 
-router.put("/:setId/photos/:photoId", isSetOwnerOrAdmin, async (req, res) => {
-  const addedPhoto = await SetService.addPhotoToSet(
-    req.params.setId,
-    req.params.photoId
-  );
-  console.log(
-    `Adding photo ${req.params.photoId} to set ${req.params.setId} by user ${req.user.id}`
-  );
-  res.json(addedPhoto);
-});
+  async deleteSet(req, res) {
+    const deletedSet = await this.setService.deleteSet(req.params.setId);
+    console.log(`Deleting set ${req.params.setId} by user ${req.user.id}`);
+    res.json(deletedSet);
+  }
 
-router.delete(
-  "/:setId/photos/:photoId",
-  isSetOwnerOrAdmin,
-  async (req, res) => {
-    const deletedPhoto = await SetService.deletePhotoFromSet(
+  async addPhotoToSet(req, res) {
+    const addedPhoto = await this.setService.addPhotoToSet(
+      req.params.setId,
+      req.params.photoId
+    );
+    console.log(
+      `Adding photo ${req.params.photoId} to set ${req.params.setId} by user ${req.user.id}`
+    );
+    res.json(addedPhoto);
+  }
+
+  async deletePhotoFromSet(req, res) {
+    const deletedPhoto = await this.setService.deletePhotoFromSet(
       req.params.setId,
       req.params.photoId
     );
@@ -74,20 +80,18 @@ router.delete(
     );
     res.json(deletedPhoto);
   }
-);
 
-router.get("/new", async (req, res) => {
-  const newSets = await SetService.getNewSets();
-  console.log(`Reading new sets by user ${req.user.id}`);
-  res.json(newSets);
-});
+  async getNewSets(req, res) {
+    const newSets = await this.setService.getNewSets();
+    console.log(`Reading new sets`);
+    res.json(newSets);
+  }
 
-router.get("/user/:userId", async (req, res) => {
-  const userSets = await SetService.readUserSets(req.params.userId);
-  console.log(
-    `Reading sets of user ${req.params.userId} by user ${req.user.id}`
-  );
-  res.json(userSets);
-});
+  async readUserSets(req, res) {
+    const userSets = await this.setService.readUserSets(req.params.userId);
+    console.log(`Reading sets of user ${req.params.userId}`);
+    res.json(userSets);
+  }
+}
 
-module.exports = router;
+module.exports = new SetHandler();

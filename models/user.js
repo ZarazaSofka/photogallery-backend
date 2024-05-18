@@ -2,7 +2,6 @@ const { Schema, model } = require("mongoose");
 const passportLocalMongoose = require("passport-local-mongoose");
 const Photo = require("./photo");
 const Set = require("./set");
-
 const userSchema = new Schema(
   {
     login: {
@@ -15,6 +14,16 @@ const userSchema = new Schema(
       required: true,
       unique: true,
       lowercase: true,
+    },
+    profilePhoto: {
+      buffer: {
+        type: Buffer,
+        default: null,
+      },
+      contentType: {
+        type: String,
+        default: "image/jpeg",
+      },
     },
     registrationDate: {
       type: Date,
@@ -30,9 +39,13 @@ const userSchema = new Schema(
     toJSON: {
       virtuals: true,
       transform: function (doc, ret) {
-        // Remove the _id and password fields from the returned object
-        delete ret._id;
-        delete ret.password;
+        return {
+          id: ret._id,
+          login: ret.login,
+          email: ret.email,
+          registrationDate: ret.registrationDate,
+          rights: ret.rights,
+        };
       },
     },
   }
@@ -40,18 +53,15 @@ const userSchema = new Schema(
 
 userSchema.plugin(passportLocalMongoose, { usernameField: "login" });
 
-userSchema.virtual("id").get(function () {
-  return this._id;
+userSchema.post("findOneAndDelete", async function (doc) {
+  if (doc) {
+    await Set.deleteMany({ user: doc._id });
+    await Photo.deleteMany({ user: doc._id });
+  }
 });
 
-userSchema.pre("remove", async function (next) {
-  try {
-    await Photo.deleteMany({ user: this._id });
-    await Set.deleteMany({ user: this._id });
-    next();
-  } catch (error) {
-    next(error);
-  }
+userSchema.virtual("id").get(function () {
+  return this._id;
 });
 
 const User = model("User", userSchema);

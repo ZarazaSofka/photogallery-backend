@@ -1,83 +1,112 @@
 const { Router } = require("express");
-const { upload } = require("../utils/connectDB");
-const PhotoService = require("../services/photo");
-const router = Router();
-const authMiddleware = require("../utils/middleware");
+const multer = require("multer");
+const { isPhotoOwnerOrAdmin, authMiddleware } = require("../utils/middleware");
 
-const isPhotoOwnerOrAdmin = async (req, res, next) => {
-  try {
-    const userId = await PhotoService.getPhotoUser(req.params.id);
-    if (
-      req.user &&
-      (req.user.rights.includes("ROLE_ADMIN") || req.user.id === userId)
-    ) {
-      next();
-    } else {
-      throw new Error("Недостаточно прав для выполнения данного действия");
-    }
-  } catch (e) {
-    res.status(403).json({ message: e.message });
+class PhotoHandler {
+  constructor() {
+    this.router = Router();
+    this.upload = multer();
+    this.photoService = require("../services/photo");
+    this.initializeRoutes();
   }
-};
 
-router.get("/user/:userId", async (req, res) => {
-  console.log(`GET /photo/user/${req.params.userId}`);
-  const photos = await PhotoService.readUserPhotos(req.params.userId);
-  res.json(photos);
-});
+  initializeRoutes() {
+    this.router.get("/", this.safeHandler(this.getAllPhotos));
+    this.router.get("/popular", this.safeHandler(this.getPopularPhotos));
+    this.router.get("/latest", this.safeHandler(this.getLatestPhotos));
+    this.router.get("/:id", this.safeHandler(this.getPhoto));
+    this.router.get("/user/:userId", this.safeHandler(this.getUserPhotos));
+    this.router.post(
+      "/",
+      authMiddleware,
+      this.upload.single("file"),
+      this.safeHandler(this.createPhoto)
+    );
+    this.router.put(
+      "/:id/like",
+      authMiddleware,
+      this.safeHandler(this.likePhoto)
+    );
 
-router.get("/popular", async (req, res) => {
-  console.log("GET /photo/popular");
-  const photos = await PhotoService.readPopularPhotos();
-  res.json(photos);
-});
+    this.router.delete(
+      "/:id",
+      isPhotoOwnerOrAdmin,
+      this.safeHandler(this.deletePhoto)
+    );
+  }
 
-router.get("/latest", async (req, res) => {
-  console.log("GET /photo/latest");
-  const photos = await PhotoService.readLatestPhotos();
-  res.json(photos);
-});
+  safeHandler(handler) {
+    return async (req, res, next) => {
+      try {
+        await handler.call(this, req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    };
+  }
 
-router.get("/", async (req, res) => {
-  console.log("GET /photo/");
-  const { last } = req.query;
-  const photos = await PhotoService.readPhotos(last);
-  res.json(photos);
-});
+  async getUserPhotos(req, res) {
+    console.log(`GET /photo/user/${req.params.userId}`);
+    const photos = await this.photoService.readUserPhotos(req.params.userId);
+    res.json(photos);
+  }
 
-router.get("/:id", async (req, res) => {
-  console.log(`GET /photo/${req.params.id}`);
-  const photo = await PhotoService.readPhoto(req.params.id);
-  if (photo) {
-    res.set("Content-Type", photo.type);
-    res.send(photo);
-  } else res.sendStatus(404);
-});
+  async getPopularPhotos(req, res) {
+    console.log("GET /photo/popular");
+    const photos = await this.photoService.readPopularPhotos();
+    res.json(photos);
+  }
 
-router.get("/:id/compressed", async (req, res) => {
-  console.log(`GET /photo/${req.params.id}/compressed`);
-  const photo = await PhotoService.readCompressedPhoto(req.params.id);
-  if (photo) {
-    res.set("Content-Type", photo.type);
-    res.send(photo);
-  } else res.sendStatus(404);
-});
+  async getLatestPhotos(req, res) {
+    console.log("GET /photo/latest");
+    const photos = await this.photoService.readLatestPhotos();
+    res.json(photos);
+  }
 
-router.post("/", authMiddleware, upload.single("file"), async (req, res) => {
-  console.log(`POST /photo/ - ${req.file.originalname}`);
-  const photo = await PhotoService.createPhoto(
-    req.user.id,
-    req.file._id,
-    req.body.description
-  );
-  res.json(photo);
-});
+  async getAllPhotos(req, res) {
+    console.log("GET /photo/");
+    const { last } = req.query;
+    const photos = await this.photoService.readPhotos(last);
+    res.json(photos);
+  }
 
-router.delete("/:id", isPhotoOwnerOrAdmin, async (req, res) => {
-  console.log(`DELETE /photo/${req.params.id}`);
-  const deleted = await PhotoService.deletePhoto(req.params.id);
-  if (deleted) res.sendStatus(200);
-  else res.sendStatus(404);
-});
+  async getPhoto(req, res) {
+    console.log(`GET /photo/${req.params.id}`);
+    const photo = await this.photoService.readPhoto(req.params.id);
+    res.json(photo);
+  }
 
-module.exports = router;
+  async createPhoto(req, res) {
+    console.log(req);
+    if (!req.file) return res.sendStatus(400);
+    console.log(`POST /photo/ - ${req.file.originalname}`);
+    console.log(req.body);
+    console.log(req.file);
+    const photo = await this.photoService.createPhoto(
+      req.user.id,
+      req.file,
+      req.body.description
+    );
+    res.json(photo);
+  }
+
+  async deletePhoto(req, res) {
+    console.log(`DELETE /photo/${req.params.id}`);
+    const deleted = await this.photoService.deletePhoto(req.params.id);
+    if (deleted) res.sendStatus(200);
+    else res.sendStatus(404);
+  }
+
+  async likePhoto(req, res) {
+    try {
+      console.log(`PUT /photo/${req.params.id}/like`);
+      const { id } = req.params;
+      await this.photoService.likePhoto(req.user.id, id);
+      res.sendStatus(200);
+    } catch (error) {
+      res.sendStatus(404);
+    }
+  }
+}
+
+module.exports = new PhotoHandler();

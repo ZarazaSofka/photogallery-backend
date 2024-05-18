@@ -1,127 +1,110 @@
-const { gfs } = require("../utils/connectDB");
 const Photo = require("../models/photo");
 const sharp = require("sharp");
 const config = require("../config");
-
-module.exports = class PhotoService {
-  static async readUserPhotos(userId) {
+class PhotoService {
+  async readUserPhotos(userId) {
     console.log(`Reading user photos for user ${userId}`);
-    return await Photo.find({ user: userId })
+    const photos = await Photo.find({ user: userId })
       .sort({ createdAt: -1 })
       .populate("user");
+    return photos.map((photo) => photo._id);
   }
 
-  static async readPopularPhotos() {
+  async readPopularPhotos() {
     console.log("Reading popular photos");
-    return await Photo.find().sort({ score: -1 }).limit(10).populate("user");
-  }
-
-  static async readLatestPhotos() {
-    console.log("Reading latest photos");
-    return await Photo.find()
-      .sort({ createdAt: -1 })
+    const photos = await Photo.find()
+      .sort({ score: -1 })
       .limit(10)
       .populate("user");
+    return photos.map((photo) => photo._id);
   }
 
-  static async readPhotos(last = null) {
+  async readLatestPhotos() {
+    console.log("Reading latest photos");
+    return (
+      await Photo.find().sort({ createdAt: -1 }).limit(10).populate("user")
+    ).map((photo) => photo._id);
+  }
+
+  async readPhotos(last = null) {
     const limit = parseInt(config.MAX_DOWNLOAD_PHOTOS_VALUE);
-    const query = last ? { _id: { $lt: last } } : {};
+    let query = {};
+
+    if (last) {
+      const lastPhoto = await Photo.findById(last).select("createdAt");
+      if (lastPhoto) {
+        query = { createdAt: { $lt: lastPhoto.createdAt } };
+      }
+    }
+
     console.log(`Reading photos up to ${last} with limit ${limit}`);
-    const photos = await Photo.aggregate([
-      { $match: query },
-      { $sort: { _id: -1 } },
-      { $limit: limit },
-    ]);
-    return await Photo.populate(photos, { path: "user" });
+    const photos = await Photo.find(query)
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .select("_id");
+
+    return photos.map((photo) => photo._id);
   }
 
-  static async readPhoto(id) {
-    console.log(`Reading photo ${id}`);
-    const photo = await Photo.findById(id);
-    if (!photo) return null;
-    return await createBlob(photo.file);
+  async readPhoto(id) {
+    console.log(`Reading photo data ${id}`);
+    try {
+      return await Photo.findById(id).populate("user");
+    } catch (error) {
+      console.error("Ошибка получения данных фотографии:", error);
+    }
   }
 
-  static async readCompressedPhoto(id) {
-    console.log(`Reading compressed photo ${id}`);
-    const photo = await Photo.findById(id);
-    if (!photo) return null;
-    return await createBlob(photo.compressed);
-  }
-
-  static async createPhoto(userId, fileId, description = null) {
-    console.log(`Creating photo for user ${userId} with file ${fileId}`);
-    const compressedPhotoId = createCompressedPhoto(fileId);
+  async createPhoto(userId, file, description = null) {
+    console.log(
+      `Creating photo for user ${userId} with file ${file?.originalname}`
+    );
+    if (file.size > config.MAX_UPLOAD_SIZE) {
+      const error = new Error("File is too large");
+      error.code = 413;
+      throw error;
+    }
     const newPhoto = new Photo({
-      file: fileId,
-      compressed: compressedPhotoId,
+      buffer: file.buffer,
+      contentType: file.mimetype,
       user: userId,
       score: 0,
       likes: [],
     });
     if (description) newPhoto.description = description;
-    return await newPhoto.save().populate("user");
+    await newPhoto.save();
+
+    return { id: newPhoto._id };
   }
 
-  static async deletePhoto(id) {
+  async deletePhoto(id) {
     console.log(`Deleting photo ${id}`);
-    const photo = await Photo.findById(id);
-    await Promise.all([
-      gfs.remove({ _id: photo.file }),
-      gfs.remove({ _id: photo.compressed }),
-    ]);
-    return Photo.findByIdAndDelete(id).populate("user");
+    return Photo.findByIdAndDelete(id).then((photo) => !!photo);
   }
-  static async getPhotoUser(id) {
-    return await Photo.findById(id, "user").exec();
+  async getPhotoUser(id) {
+    return (await Photo.findById(id, "user").exec()).user;
   }
-};
 
-function createCompressedPhoto(fileId) {
-  const readStream = gfs.createReadStream({ _id: fileId });
+  async likePhoto(userId, id) {
+    try {
+      console.log(`Updating photo ${id} like`);
+      const photo = await Photo.findById(id);
+      if (!photo) throw new Error("Фотография не найдена");
+      if (photo.likes.includes(userId)) {
+        photo.likes = photo.likes.filter((like) => like.toString() !== userId);
+        photo.score--;
+      } else {
+        photo.likes.push(userId);
+        photo.score++;
+      }
 
-  const compressedImage = sharp()
-    .resize(
-      config.COMPRESSES_RESOLUTION.width,
-      config.COMPRESSES_RESOLUTION.height
-    )
-    .on("error", (err) => {
-      console.error(err);
-      res.status(500).json({ error: "Internal server error" });
-    });
-
-  const writeStream = gfs.createWriteStream({
-    filename: `${req.file.filename}_compressed`,
-    metadata: {
-      originalFileId: fileId,
-    },
-  });
-
-  readStream.pipe(compressedImage).pipe(writeStream);
-  writeStream.on("close", async (file) => {
-    return file._id;
-  });
+      await photo.save();
+    } catch (error) {
+      console.error("Ошибка лайка фотографии:", error);
+      throw error;
+    }
+  }
 }
 
-async function createBlob(fileId) {
-  gfs.files.findOne({ _id: fileId }, (err, file) => {
-    if (err) {
-      console.error(err);
-      return;
-    }
-    if (!file) {
-      console.error("Файл не найден");
-      return;
-    }
-
-    const readstream = gfs.createReadStream({ _id: fileId });
-    let data = [];
-    readstream.on("data", (chunk) => {
-      data.push(chunk);
-    });
-    readstream.on("end", () => {
-      return new Blob(data, { type: file.contentType });
-    });
-  });
-}
+const photoService = new PhotoService();
+module.exports = photoService;
